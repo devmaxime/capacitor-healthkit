@@ -544,26 +544,35 @@ public class CapacitorHealthkitPlugin: CAPPlugin {
         guard let _limit = call.options["limit"] as? Int else {
             return call.reject("Must provide limit")
         }
+        
+        let pageToken = call.options["pageToken"] as? String
 
         let limit: Int = (_limit == 0) ? HKObjectQueryNoLimit : _limit
 
-        let predicate = HKQuery.predicateForSamples(withStart: _startDate, end: _endDate, options: HKQueryOptions.strictStartDate)
-
-        guard let sampleType: HKSampleType = getSampleType(sampleName: _sampleName) else {
-            return call.reject("Error in sample name")
-        }
-
-        let query = HKSampleQuery(sampleType: sampleType, predicate: predicate, limit: limit, sortDescriptors: nil) {
-            _, results, _ in
-            guard let output: [[String: Any]] = self.generateOutput(sampleName: _sampleName, results: results) else {
-                return call.reject("Error happened while generating outputs")
+        // If pageToken is provided, use manual pagination (existing behavior)
+        if let pageToken = pageToken {
+            print("Using manual pagination with token: \(pageToken)")
+            queryHKitSampleTypePage(sampleName: _sampleName, startDate: _startDate, endDate: _endDate, limit: limit, pageToken: pageToken) { result in
+                switch result {
+                case let .success(output):
+                    call.resolve(output)
+                case let .failure(error):
+                    call.reject("Error happened while generating outputs: \((error as? HKSampleError)?.outputMessage ?? error.localizedDescription)")
+                }
             }
-            call.resolve([
-                "countReturn": output.count,
-                "resultData": output,
-            ])
+            return
         }
-        healthStore.execute(query)
+        
+        // If no pageToken is provided, use automatic pagination to get all records
+        print("Using automatic pagination to retrieve all records")
+        queryHKitSampleTypeAll(sampleName: _sampleName, startDate: _startDate, endDate: _endDate, pageSize: limit) { result in
+            switch result {
+            case let .success(output):
+                call.resolve(output)
+            case let .failure(error):
+                call.reject("Error happened while generating outputs: \((error as? HKSampleError)?.outputMessage ?? error.localizedDescription)")
+            }
+        }
     }
     
     @objc func isAvailable(_ call: CAPPluginCall) {
@@ -612,11 +621,11 @@ public class CapacitorHealthkitPlugin: CAPPlugin {
             call.reject("Must provide sampleNames")
             return
         }
-        guard let _startDate = call.options["startDate"] as? Date else {
+        guard let startDateString = call.options["startDate"] as? String else {
             call.reject("Must provide startDate")
             return
         }
-        guard let _endDate = call.options["endDate"] as? Date else {
+        guard let endDateString = call.options["endDate"] as? String else {
             call.reject("Must provide endDate")
             return
         }
@@ -625,6 +634,9 @@ public class CapacitorHealthkitPlugin: CAPPlugin {
             return
         }
 
+        let _startDate = getDateFromString(inputDate: startDateString)
+        let _endDate = getDateFromString(inputDate: endDateString)
+        let pageToken = call.options["pageToken"] as? String
         let limit: Int = (_limit == 0) ? HKObjectQueryNoLimit : _limit
 
         var output: [String: [String: Any]] = [:]
@@ -634,21 +646,41 @@ public class CapacitorHealthkitPlugin: CAPPlugin {
         for _sampleName in _sampleNames {
             dispatchGroup.enter()
 
-            queryHKitSampleTypeSpecial(sampleName: _sampleName, startDate: _startDate, endDate: _endDate, limit: limit) { result in
-                switch result {
-                case let .success(sampleOutput):
-                    output[_sampleName] = sampleOutput
-                case let .failure(error):
-
-                    var errorMessage = ""
-                    if let localError = error as? HKSampleError {
-                        errorMessage = localError.outputMessage
-                    } else {
-                        errorMessage = error.localizedDescription
+            // Determine which query method to use based on pageToken
+            if let pageToken = pageToken {
+                // Manual pagination
+                queryHKitSampleTypePage(sampleName: _sampleName, startDate: _startDate, endDate: _endDate, limit: limit, pageToken: pageToken) { result in
+                    switch result {
+                    case let .success(sampleOutput):
+                        output[_sampleName] = sampleOutput
+                    case let .failure(error):
+                        var errorMessage = ""
+                        if let localError = error as? HKSampleError {
+                            errorMessage = localError.outputMessage
+                        } else {
+                            errorMessage = error.localizedDescription
+                        }
+                        output[_sampleName] = ["errorDescription": errorMessage]
                     }
-                    output[_sampleName] = ["errorDescription": errorMessage]
+                    dispatchGroup.leave()
                 }
-                dispatchGroup.leave()
+            } else {
+                // Automatic pagination
+                queryHKitSampleTypeAll(sampleName: _sampleName, startDate: _startDate, endDate: _endDate, pageSize: limit) { result in
+                    switch result {
+                    case let .success(sampleOutput):
+                        output[_sampleName] = sampleOutput
+                    case let .failure(error):
+                        var errorMessage = ""
+                        if let localError = error as? HKSampleError {
+                            errorMessage = localError.outputMessage
+                        } else {
+                            errorMessage = error.localizedDescription
+                        }
+                        output[_sampleName] = ["errorDescription": errorMessage]
+                    }
+                    dispatchGroup.leave()
+                }
             }
         }
 
@@ -676,5 +708,101 @@ public class CapacitorHealthkitPlugin: CAPPlugin {
             ]))
         }
         healthStore.execute(query)
+    }
+    
+    /**
+     * Reads a single page of records with the given page token (anchor date).
+     */
+    func queryHKitSampleTypePage(sampleName: String, startDate: Date, endDate: Date, limit: Int, pageToken: String, completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        // Parse pageToken as ISO date and use it as the anchor date
+        let pageStartDate = getDateFromString(inputDate: pageToken)
+        
+        // Ensure the page start date is within our query range
+        let queryStartDate = max(pageStartDate, startDate)
+        
+        let predicate = HKQuery.predicateForSamples(withStart: queryStartDate, end: endDate, options: HKQueryOptions.strictStartDate)
+
+        guard let sampleType: HKSampleType = getSampleType(sampleName: sampleName) else {
+            return completion(.failure(HKSampleError.sampleTypeFailed))
+        }
+
+        // Sort by start date ascending for pagination
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        
+        let query = HKSampleQuery(sampleType: sampleType, predicate: predicate, limit: limit, sortDescriptors: [sortDescriptor]) {
+            _, results, _ in
+            guard let output: [[String: Any]] = self.generateOutput(sampleName: sampleName, results: results) else {
+                return completion(.failure(HKSampleError.sampleTypeFailed))
+            }
+            
+            var result: [String: Any] = [
+                "countReturn": output.count,
+                "resultData": output,
+            ]
+            
+            // If we have results and they're at the limit, provide next page token
+            if let samples = results, samples.count == limit, let lastSample = samples.last {
+                let nextPageToken = ISO8601DateFormatter().string(from: lastSample.endDate)
+                result["nextPageToken"] = nextPageToken
+            }
+            
+            completion(.success(result))
+        }
+        healthStore.execute(query)
+    }
+    
+    /**
+     * Reads all records by automatically handling pagination.
+     */
+    func queryHKitSampleTypeAll(sampleName: String, startDate: Date, endDate: Date, pageSize: Int, completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        var allResults: [[String: Any]] = []
+        var currentStartDate = startDate
+        var totalPages = 0
+        
+        func fetchNextPage() {
+            totalPages += 1
+            print("Fetching page \(totalPages) starting from: \(currentStartDate)")
+            
+            let predicate = HKQuery.predicateForSamples(withStart: currentStartDate, end: endDate, options: HKQueryOptions.strictStartDate)
+
+            guard let sampleType: HKSampleType = getSampleType(sampleName: sampleName) else {
+                return completion(.failure(HKSampleError.sampleTypeFailed))
+            }
+
+            // Sort by start date ascending for consistent pagination
+            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+            
+            let query = HKSampleQuery(sampleType: sampleType, predicate: predicate, limit: pageSize, sortDescriptors: [sortDescriptor]) {
+                _, results, _ in
+                guard let pageOutput: [[String: Any]] = self.generateOutput(sampleName: sampleName, results: results) else {
+                    return completion(.failure(HKSampleError.sampleTypeFailed))
+                }
+                
+                print("Page \(totalPages): Retrieved \(pageOutput.count) records")
+                allResults.append(contentsOf: pageOutput)
+                
+                // Check if we should continue pagination
+                if let samples = results, samples.count == pageSize, let lastSample = samples.last {
+                    // Update start date for next page to be after the last sample
+                    currentStartDate = lastSample.endDate.addingTimeInterval(0.001) // Add 1ms to avoid duplicates
+                    
+                    // Continue if we haven't reached the end date
+                    if currentStartDate < endDate {
+                        fetchNextPage()
+                        return
+                    }
+                }
+                
+                // No more results or reached the limit, return all collected results
+                print("Automatic pagination complete. Total pages: \(totalPages), Total records: \(allResults.count)")
+                completion(.success([
+                    "countReturn": allResults.count,
+                    "resultData": allResults,
+                ]))
+            }
+            healthStore.execute(query)
+        }
+        
+        fetchNextPage()
     }
 }

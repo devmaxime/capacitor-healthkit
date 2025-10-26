@@ -7,18 +7,36 @@ export interface CapacitorHealthkitPlugin {
   requestAuthorization(authOptions: AuthorizationQueryOptions): Promise<void>;
   /**
    * This defines a query to the Healthkit for a single type of data.
+   *
+   * When pageToken is not provided, automatic pagination is used to retrieve ALL records
+   * within the specified time range. This may take longer for large datasets but ensures
+   * complete data retrieval.
+   *
+   * When pageToken is provided, manual pagination is used and only a single page of
+   * results is returned along with a nextPageToken for retrieving subsequent pages.
+   *
    * @param queryOptions defines the type of data and the timeframe which shall be queried, a limit can be set to reduce the number of results.
    */
-  queryHKitSampleType<T>(queryOptions:SingleQueryOptions): Promise<QueryOutput<T>>;
+  queryHKitSampleType<T>(
+    queryOptions: SingleQueryOptions,
+  ): Promise<QueryOutput<T>>;
   /**
    * This functions resolves if HealthKitData is available it uses the native HKHealthStore.isHealthDataAvailable() funtion of the HealthKit .
    */
   isAvailable(): Promise<void>;
   /**
-   * This defines a query to the Healthkit for a single type of data. This function has not been tested.
+   * This defines a query to the Healthkit for multiple types of data.
+   *
+   * When pageToken is not provided, automatic pagination is used to retrieve ALL records
+   * within the specified time range. This may take longer for large datasets but ensures
+   * complete data retrieval.
+   *
+   * When pageToken is provided, manual pagination is used and only a single page of
+   * results is returned along with a nextPageToken for retrieving subsequent pages.
+   *
    * @param queryOptions defines the sample types which can be queried for
    */
-  multipleQueryHKitSampleType(queryOptions:MultipleQueryOptions): Promise<any>;
+  multipleQueryHKitSampleType(queryOptions: MultipleQueryOptions): Promise<any>;
   /**
    * Checks if there is writing permission for one specific sample type. This function has not been tested.
    * @param queryOptions defines the sampletype for which you need to check for writing permission.
@@ -28,15 +46,24 @@ export interface CapacitorHealthkitPlugin {
    * Checks if there is writing permission for multiple sample types. This function has not been tested.
    * @param queryOptions defines the sampletypes for which you need to check for writing permission.
    */
-  multipleIsEditionAuthorized(queryOptions: MultipleEditionQuery): Promise<void>;
+  multipleIsEditionAuthorized(
+    queryOptions: MultipleEditionQuery,
+  ): Promise<void>;
 }
 
 /**
  * This interface is used for any results coming from HealthKit. It always has a count and the actual results.
+ *
+ * When using automatic pagination (no pageToken provided), all records are returned
+ * and nextPageToken will be undefined.
+ *
+ * When using manual pagination (pageToken provided), nextPageToken will contain
+ * the token for the next page, or undefined if this is the last page.
  */
 export interface QueryOutput<T = SleepData | ActivityData | OtherData> {
   countReturn: number;
   resultData: T[];
+  nextPageToken?: string;
 }
 
 export interface DeviceInformation {
@@ -63,13 +90,13 @@ export interface BaseData {
 /**
  * These data points are specific for sleep data.
  */
-export interface SleepData extends BaseData  {
+export interface SleepData extends BaseData {
   sleepState: string;
   timeZone: string;
 }
 
 /**
- * These data points are specific for activities - not every activity automatically has a corresponding entry. 
+ * These data points are specific for activities - not every activity automatically has a corresponding entry.
  */
 export interface ActivityData extends BaseData {
   totalFlightsClimbed: number;
@@ -95,6 +122,7 @@ export interface BaseQueryOptions {
   startDate: string;
   endDate: string;
   limit: number;
+  pageToken?: string;
 }
 
 /**
@@ -111,7 +139,6 @@ export interface MultipleQueryOptions extends BaseQueryOptions {
   sampleNames: string[];
 }
 
-
 /**
  * Used for authorization of reading and writing access.
  */
@@ -121,7 +148,6 @@ export interface AuthorizationQueryOptions {
   all: string[];
 }
 
-
 /**
  * This is used for checking writing permissions.
  */
@@ -129,14 +155,12 @@ export interface EditionQuery {
   sampleName: string;
 }
 
-
 /**
  * This is used for checking writing permissions.
  */
 export interface MultipleEditionQuery {
   sampleNames: string[];
 }
-
 
 /**
  * These Sample names define the possible query options.
@@ -161,5 +185,5 @@ export enum SampleNames {
   BASAL_BODY_TEMPERATURE = 'basalBodyTemperature',
   BODY_TEMPERATURE = 'bodyTemperature',
   BLOOD_PRESSURE_SYSTOLIC = 'bloodPressureSystolic',
-  BLOOD_PRESSURE_DIASTOLIC = 'bloodPressureDiastolic'
+  BLOOD_PRESSURE_DIASTOLIC = 'bloodPressureDiastolic',
 }

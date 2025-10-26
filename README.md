@@ -137,6 +137,13 @@ queryHKitSampleType<T>(queryOptions: SingleQueryOptions) => Promise<QueryOutput<
 
 This defines a query to the Healthkit for a single type of data.
 
+When pageToken is not provided, automatic pagination is used to retrieve ALL records
+within the specified time range. This may take longer for large datasets but ensures
+complete data retrieval.
+
+When pageToken is provided, manual pagination is used and only a single page of
+results is returned along with a nextPageToken for retrieving subsequent pages.
+
 | Param              | Type                                                              | Description                                                                                                            |
 | ------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **`queryOptions`** | <code><a href="#singlequeryoptions">SingleQueryOptions</a></code> | defines the type of data and the timeframe which shall be queried, a limit can be set to reduce the number of results. |
@@ -163,7 +170,14 @@ This functions resolves if HealthKitData is available it uses the native HKHealt
 multipleQueryHKitSampleType(queryOptions: MultipleQueryOptions) => Promise<any>
 ```
 
-This defines a query to the Healthkit for a single type of data. This function has not been tested.
+This defines a query to the Healthkit for multiple types of data.
+
+When pageToken is not provided, automatic pagination is used to retrieve ALL records
+within the specified time range. This may take longer for large datasets but ensures
+complete data retrieval.
+
+When pageToken is provided, manual pagination is used and only a single page of
+results is returned along with a nextPageToken for retrieving subsequent pages.
 
 | Param              | Type                                                                  | Description                                       |
 | ------------------ | --------------------------------------------------------------------- | ------------------------------------------------- |
@@ -222,10 +236,17 @@ Used for authorization of reading and writing access.
 
 This interface is used for any results coming from HealthKit. It always has a count and the actual results.
 
-| Prop              | Type                |
-| ----------------- | ------------------- |
-| **`countReturn`** | <code>number</code> |
-| **`resultData`**  | <code>T[]</code>    |
+When using automatic pagination (no pageToken provided), all records are returned
+and nextPageToken will be undefined.
+
+When using manual pagination (pageToken provided), nextPageToken will contain
+the token for the next page, or undefined if this is the last page.
+
+| Prop                | Type                |
+| ------------------- | ------------------- |
+| **`countReturn`**   | <code>number</code> |
+| **`resultData`**    | <code>T[]</code>    |
+| **`nextPageToken`** | <code>string</code> |
 
 
 #### SingleQueryOptions
