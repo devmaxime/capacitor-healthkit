@@ -49,6 +49,14 @@ export interface CapacitorHealthkitPlugin {
   multipleIsEditionAuthorized(
     queryOptions: MultipleEditionQuery,
   ): Promise<void>;
+  /**
+   * Aggregates records of the specified type within a time range.
+   * Returns aggregated data grouped by the specified time period (e.g., daily totals).
+   * Uses HKStatisticsCollectionQuery for efficient aggregation.
+   * 
+   * @param options defines the type of data, timeframe, and grouping period
+   */
+  aggregateRecords(options: AggregateQueryOptions): Promise<AggregateResponse>;
 }
 
 /**
@@ -186,4 +194,37 @@ export enum SampleNames {
   BODY_TEMPERATURE = 'bodyTemperature',
   BLOOD_PRESSURE_SYSTOLIC = 'bloodPressureSystolic',
   BLOOD_PRESSURE_DIASTOLIC = 'bloodPressureDiastolic',
+}
+
+/**
+ * Time period for grouping aggregated data.
+ */
+export type AggregateGroupBy = 'hour' | 'day' | 'week' | 'month';
+
+/**
+ * Options for aggregating health records.
+ */
+export interface AggregateQueryOptions {
+  startDate: string;
+  endDate: string;
+  sampleName: string;
+  groupBy?: AggregateGroupBy;
+}
+
+/**
+ * Response from aggregating health records.
+ * Contains aggregated data grouped by time periods.
+ */
+export interface AggregateResponse {
+  aggregates: AggregateData[];
+}
+
+/**
+ * Aggregated data for a specific time period.
+ */
+export interface AggregateData {
+  startTime: string;
+  endTime: string;
+  value: number;
+  unit?: string;
 }

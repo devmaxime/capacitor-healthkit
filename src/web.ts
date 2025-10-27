@@ -7,6 +7,8 @@ import type {
   CapacitorHealthkitPlugin,
   MultipleQueryOptions,
   SingleQueryOptions,
+  AggregateQueryOptions,
+  AggregateResponse,
 } from './definitions';
 
 export class CapacitorHealthkitWeb
@@ -37,6 +39,12 @@ export class CapacitorHealthkitWeb
   }
 
   async multipleIsEditionAuthorized(): Promise<void> {
+    throw this.unimplemented('Not implemented on web.');
+  }
+
+  async aggregateRecords(
+    _options: AggregateQueryOptions,
+  ): Promise<AggregateResponse> {
     throw this.unimplemented('Not implemented on web.');
   }
 }

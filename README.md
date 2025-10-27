@@ -107,7 +107,9 @@ And you're all set ! :+1:
 * [`multipleQueryHKitSampleType(...)`](#multiplequeryhkitsampletype)
 * [`isEditionAuthorized(...)`](#iseditionauthorized)
 * [`multipleIsEditionAuthorized(...)`](#multipleiseditionauthorized)
+* [`aggregateRecords(...)`](#aggregaterecords)
 * [Interfaces](#interfaces)
+* [Type Aliases](#type-aliases)
 
 </docgen-index>
 
@@ -218,6 +220,25 @@ Checks if there is writing permission for multiple sample types. This function h
 --------------------
 
 
+### aggregateRecords(...)
+
+```typescript
+aggregateRecords(options: AggregateQueryOptions) => Promise<AggregateResponse>
+```
+
+Aggregates records of the specified type within a time range.
+Returns aggregated data grouped by the specified time period (e.g., daily totals).
+Uses HKStatisticsCollectionQuery for efficient aggregation.
+
+| Param         | Type                                                                    | Description                                              |
+| ------------- | ----------------------------------------------------------------------- | -------------------------------------------------------- |
+| **`options`** | <code><a href="#aggregatequeryoptions">AggregateQueryOptions</a></code> | defines the type of data, timeframe, and grouping period |
+
+**Returns:** <code>Promise&lt;<a href="#aggregateresponse">AggregateResponse</a>&gt;</code>
+
+--------------------
+
+
 ### Interfaces
 
 
@@ -283,6 +304,50 @@ This is used for checking writing permissions.
 | Prop              | Type                  |
 | ----------------- | --------------------- |
 | **`sampleNames`** | <code>string[]</code> |
+
+
+#### AggregateResponse
+
+Response from aggregating health records.
+Contains aggregated data grouped by time periods.
+
+| Prop             | Type                         |
+| ---------------- | ---------------------------- |
+| **`aggregates`** | <code>AggregateData[]</code> |
+
+
+#### AggregateData
+
+Aggregated data for a specific time period.
+
+| Prop            | Type                |
+| --------------- | ------------------- |
+| **`startTime`** | <code>string</code> |
+| **`endTime`**   | <code>string</code> |
+| **`value`**     | <code>number</code> |
+| **`unit`**      | <code>string</code> |
+
+
+#### AggregateQueryOptions
+
+Options for aggregating health records.
+
+| Prop             | Type                                                          |
+| ---------------- | ------------------------------------------------------------- |
+| **`startDate`**  | <code>string</code>                                           |
+| **`endDate`**    | <code>string</code>                                           |
+| **`sampleName`** | <code>string</code>                                           |
+| **`groupBy`**    | <code><a href="#aggregategroupby">AggregateGroupBy</a></code> |
+
+
+### Type Aliases
+
+
+#### AggregateGroupBy
+
+Time period for grouping aggregated data.
+
+<code>'hour' | 'day' | 'week' | 'month'</code>
 
 </docgen-api>
 

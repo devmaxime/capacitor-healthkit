@@ -9,7 +9,18 @@ var healthStore = HKHealthStore()
  * here: https://capacitorjs.com/docs/plugins/ios
  */
 @objc(CapacitorHealthkitPlugin)
-public class CapacitorHealthkitPlugin: CAPPlugin {
+public class CapacitorHealthkitPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "CapacitorHealthkitPlugin"
+    public let jsName = "CapacitorHealthkit"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "requestAuthorization", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "queryHKitSampleType", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "isAvailable", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "multipleQueryHKitSampleType", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "isEditionAuthorized", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "multipleIsEditionAuthorized", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "aggregateRecords", returnType: CAPPluginReturnPromise)
+    ]
 
     enum HKSampleError: Error {
         case sleepRequestFailed
@@ -804,5 +815,167 @@ public class CapacitorHealthkitPlugin: CAPPlugin {
         }
         
         fetchNextPage()
+    }
+    
+    @objc func aggregateRecords(_ call: CAPPluginCall) {
+        guard let sampleName = call.options["sampleName"] as? String else {
+            return call.reject("Must provide sampleName")
+        }
+        guard let startDateString = call.options["startDate"] as? String else {
+            return call.reject("Must provide startDate")
+        }
+        guard let endDateString = call.options["endDate"] as? String else {
+            return call.reject("Must provide endDate")
+        }
+        
+        let startDate = getDateFromString(inputDate: startDateString)
+        let endDate = getDateFromString(inputDate: endDateString)
+        let groupBy = call.options["groupBy"] as? String ?? "day"
+        
+        // Get the quantity type for the sample
+        guard let quantityType = getSampleType(sampleName: sampleName) as? HKQuantityType else {
+            return call.reject("Sample type must be a quantity type for aggregation")
+        }
+        
+        // Determine the interval based on groupBy
+        var interval = DateComponents()
+        switch groupBy {
+        case "hour":
+            interval.hour = 1
+        case "week":
+            interval.weekOfYear = 1
+        case "month":
+            interval.month = 1
+        default: // "day"
+            interval.day = 1
+        }
+        
+        // Create the predicate for the time range
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        
+        // Determine the appropriate statistics options based on the sample type
+        let statisticsOptions: HKStatisticsOptions
+        if sampleName == "heartRate" || sampleName == "restingHeartRate" || sampleName == "bloodGlucose" || sampleName == "weight" || sampleName == "bodyFat" || sampleName == "oxygenSaturation" || sampleName == "basalBodyTemperature" || sampleName == "bodyTemperature" || sampleName == "bloodPressureSystolic" || sampleName == "bloodPressureDiastolic" || sampleName == "respiratoryRate" {
+            // For discrete samples (measurements), use average
+            statisticsOptions = [.discreteAverage, .discreteMin, .discreteMax]
+        } else {
+            // For cumulative samples (steps, distance, calories, etc.), use sum
+            statisticsOptions = .cumulativeSum
+        }
+        
+        // Align start date to the beginning of the interval
+        let calendar = Calendar.current
+        var anchorDate: Date
+        switch groupBy {
+        case "hour":
+            anchorDate = calendar.dateComponents([.year, .month, .day, .hour], from: startDate).date ?? startDate
+        case "week":
+            anchorDate = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: startDate).date ?? startDate
+        case "month":
+            anchorDate = calendar.dateComponents([.year, .month], from: startDate).date ?? startDate
+        default: // "day"
+            anchorDate = calendar.startOfDay(for: startDate)
+        }
+        
+        // Create the statistics collection query
+        let query = HKStatisticsCollectionQuery(
+            quantityType: quantityType,
+            quantitySamplePredicate: predicate,
+            options: statisticsOptions,
+            anchorDate: anchorDate,
+            intervalComponents: interval
+        )
+        
+        query.initialResultsHandler = { _, results, error in
+            if let error = error {
+                call.reject("Error fetching statistics: \(error.localizedDescription)")
+                return
+            }
+            
+            guard let statsCollection = results else {
+                call.reject("No statistics results returned")
+                return
+            }
+            
+            var aggregates: [[String: Any]] = []
+            
+            // Enumerate through the statistics
+            statsCollection.enumerateStatistics(from: startDate, to: endDate) { statistics, _ in
+                let startTime = ISO8601DateFormatter().string(from: statistics.startDate)
+                let endTime = ISO8601DateFormatter().string(from: statistics.endDate)
+                
+                var value: Double = 0
+                var unit: HKUnit?
+                var unitName: String?
+                
+                // Get the appropriate unit for the sample type
+                if sampleName == "heartRate" || sampleName == "restingHeartRate" {
+                    unit = HKUnit(from: "count/min")
+                    unitName = "BPM"
+                } else if sampleName == "weight" {
+                    unit = HKUnit.gramUnit(with: .kilo)
+                    unitName = "kilogram"
+                } else if sampleName == "respiratoryRate" {
+                    unit = HKUnit(from: "count/min")
+                    unitName = "BrPM"
+                } else if sampleName == "bodyFat" || sampleName == "oxygenSaturation" {
+                    unit = HKUnit.percent()
+                    unitName = "percent"
+                } else if quantityType.is(compatibleWith: HKUnit.meter()) {
+                    unit = HKUnit.meter()
+                    unitName = "meter"
+                } else if quantityType.is(compatibleWith: HKUnit.count()) {
+                    unit = HKUnit.count()
+                    unitName = "count"
+                } else if quantityType.is(compatibleWith: HKUnit.minute()) {
+                    unit = HKUnit.minute()
+                    unitName = "minute"
+                } else if quantityType.is(compatibleWith: HKUnit.kilocalorie()) {
+                    unit = HKUnit.kilocalorie()
+                    unitName = "kilocalorie"
+                } else if quantityType.is(compatibleWith: HKUnit.moleUnit(withMolarMass: HKUnitMolarMassBloodGlucose).unitDivided(by: HKUnit.literUnit(with: .kilo))) {
+                    unit = HKUnit.moleUnit(withMolarMass: HKUnitMolarMassBloodGlucose).unitDivided(by: HKUnit.literUnit(with: .kilo))
+                    unitName = "mmol/L"
+                } else if quantityType.is(compatibleWith: HKUnit.degreeCelsius()) {
+                    unit = HKUnit.degreeCelsius()
+                    unitName = "celsius"
+                } else if quantityType.is(compatibleWith: HKUnit.millimeterOfMercury()) {
+                    unit = HKUnit.millimeterOfMercury()
+                    unitName = "mmHg"
+                }
+                
+                guard let finalUnit = unit else {
+                    return
+                }
+                
+                // Extract the value based on statistics options
+                if statisticsOptions.contains(.cumulativeSum) {
+                    if let sumQuantity = statistics.sumQuantity() {
+                        value = sumQuantity.doubleValue(for: finalUnit)
+                    }
+                } else if statisticsOptions.contains(.discreteAverage) {
+                    if let avgQuantity = statistics.averageQuantity() {
+                        value = avgQuantity.doubleValue(for: finalUnit)
+                    }
+                }
+                
+                let aggregate: [String: Any] = [
+                    "startTime": startTime,
+                    "endTime": endTime,
+                    "value": value,
+                    "unit": unitName ?? ""
+                ]
+                
+                aggregates.append(aggregate)
+            }
+            
+            let response: [String: Any] = [
+                "aggregates": aggregates
+            ]
+            
+            call.resolve(response)
+        }
+        
+        healthStore.execute(query)
     }
 }
